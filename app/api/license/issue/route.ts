@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
 import { db } from '@/lib/db';
 import { licenseKeys, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -14,14 +14,27 @@ export async function POST(req: Request): Promise<Response> {
   const { userId: clerkId } = await auth();
   if (!clerkId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const userRows = await db
+  let userRows = await db
     .select({ id: users.id })
     .from(users)
     .where(eq(users.clerkId, clerkId))
     .limit(1);
 
+  // Auto-create the user row if the Clerk webhook hasn't fired yet
   if (!userRows[0]) {
-    return Response.json({ error: 'User not found — try again in a moment' }, { status: 404 });
+    const clerkUser = await currentUser();
+    const email =
+      clerkUser?.emailAddresses.find((e) => e.id === clerkUser.primaryEmailAddressId)
+        ?.emailAddress ?? clerkUser?.emailAddresses[0]?.emailAddress;
+    if (!email) {
+      return Response.json({ error: 'Could not resolve your email from Clerk' }, { status: 400 });
+    }
+    await db.insert(users).values({ clerkId, email }).onConflictDoNothing();
+    userRows = await db.select({ id: users.id }).from(users).where(eq(users.clerkId, clerkId)).limit(1);
+  }
+
+  if (!userRows[0]) {
+    return Response.json({ error: 'Failed to create user record' }, { status: 500 });
   }
 
   const userId = userRows[0].id;
