@@ -39,3 +39,7 @@ drizzle/
 
 # clerk configuration (can include secrets)
 /.clerk/
+.vercel
+
+# sork-cli lives here for development but is its own repo — never commit it
+sork-cli/
